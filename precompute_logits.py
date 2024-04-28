@@ -1,10 +1,10 @@
 import json
 import os
 import pickle
-import lzma
 import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from typing import Optional
+import lzma
 
 # Set device, data type and other configurations
 DTYPE = torch.bfloat16
@@ -19,6 +19,7 @@ def write_shard(outputs, shard_path, compress=False):
             pickle.dump(outputs, fp, protocol=pickle.HIGHEST_PROTOCOL)
     print(f"Wrote shard {shard_path}...")
 
+
 def main(
     *,
     prompts_json_path: str,
@@ -32,7 +33,7 @@ def main(
     """Generates text samples based on a pre-trained GPT-2 model and tokenizer.
 
     Args:
-        prompts_json_path: A JSON file containing data points
+        prompts_json_path: A JSON file containing a dictionary of prompts keyed by prompt IDs
         output_dir: Where to save output pickle files
         checkpoint_path: The checkpoint path to load.
         tokenizer_path: The tokenizer path to load.
@@ -49,12 +50,11 @@ def main(
 
     # Load the prompts
     with open(prompts_json_path, "r") as fp:
-        data = json.load(fp)
+        prompts = json.load(fp)
 
     shard_count = 0
     outputs = {}
-    for i, item in enumerate(data):
-        prompt = f"Series {item['Series']} at X={item['X']} results in Y={item['Y']}"
+    for i, (key, prompt) in enumerate(sorted(prompts.items(), key=lambda t: t[0])):
         if i % output_shard_size == 0 and i != 0:
             shard_path = os.path.join(output_dir, f"gpt2_{model_size}_shard_{shard_count}.{'xz' if compress else 'pickle'}")
             write_shard(outputs, shard_path, compress)
@@ -70,7 +70,7 @@ def main(
             logits = outputs_dict.logits
 
         logits = logits.squeeze(0).cpu()
-        outputs[i] = logits  # Use index as key to keep track of order
+        outputs[key] = logits
 
     # Save the last shard
     if outputs:
