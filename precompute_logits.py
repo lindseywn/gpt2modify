@@ -1,14 +1,17 @@
 import json
 import os
 import pickle
+import sys
 import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
-from typing import Optional
 import lzma
-import sys
+import logging
+import pdb
 
-# Set device, data type, and other configurations
-DTYPE = torch.bfloat16
+# set up debugging log
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+DTYPE = torch.float32
 DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 def write_shard(outputs, shard_path, compress=False):
@@ -19,32 +22,38 @@ def write_shard(outputs, shard_path, compress=False):
         else:
             with open(shard_path, "wb") as fp:
                 pickle.dump(outputs, fp, protocol=pickle.HIGHEST_PROTOCOL)
-        print(f"Wrote shard {shard_path}...")
+        logging.info(f"Wrote shard {shard_path}...")
     except Exception as e:
-        print(f"Error writing shard {shard_path}: {e}", file=sys.stderr)
+        logging.error(f"Failed to write shard {shard_path}: {e}", exc_info=True)
 
 def main(*, prompts_json_path, output_dir, checkpoint_path, model_size="774M", tokenizer_path=None, output_shard_size=2500, compress=False):
-    print("Starting processing...")
+    logging.info("Starting processing...")
+    os.makedirs(output_dir, exist_ok=True)
+
     try:
-        os.makedirs(output_dir, exist_ok=True)
         tokenizer = GPT2Tokenizer.from_pretrained(tokenizer_path if tokenizer_path else 'gpt2')
         model = GPT2LMHeadModel.from_pretrained(checkpoint_path).to(DEVICE).eval().to(DTYPE)
+    except Exception as e:
+        logging.critical(f"Failed to load model or tokenizer: {e}", exc_info=True)
+        return
 
+    try:
         with open(prompts_json_path, "r") as fp:
             prompts = json.load(fp)
+    except Exception as e:
+        logging.critical(f"Failed to load prompts: {e}", exc_info=True)
+        return
 
-        shard_count = 0
-        outputs = {}
+    shard_count = 0
+    outputs = {}
+    try:
         for i, (key, prompt) in enumerate(sorted(prompts.items(), key=lambda t: t[0])):
-            print(f"Processing prompt {key}: {prompt[:50]}...")  # Print first 50 characters of the prompt
+            # pdb.set_trace()
+            logging.debug(f"Processing prompt {key}: {prompt[:50]}...")  
             input_ids = tokenizer.encode(prompt, return_tensors='pt', max_length=1024, truncation=True).to(DEVICE)
-            
+    
             if input_ids.nelement() == 0:
-                print(f"Skipping empty input for prompt {key}")
-                continue
-            
-            if input_ids.shape[1] == 0:  # Added check for empty after tokenization
-                print(f"Skipping prompt {key} as it leads to empty input_ids after tokenization.")
+                logging.warning(f"Skipping empty input for prompt {key}")
                 continue
 
             if i % output_shard_size == 0 and i != 0:
@@ -59,18 +68,17 @@ def main(*, prompts_json_path, output_dir, checkpoint_path, model_size="774M", t
 
             logits = logits.squeeze(0).cpu()
             outputs[key] = logits
-            print(f"Generated logits for prompt {key}")
+            logging.debug(f"Generated logits for prompt {key}")
 
         if outputs:
             shard_path = os.path.join(output_dir, f"gpt2_{model_size}_shard_{shard_count}.{'xz' if compress else 'pickle'}")
             write_shard(outputs, shard_path, compress)
-            print("Saved the final shard.")
-
-        if shard_count == 0:
-            print("No outputs were saved. Check if all prompts were skipped or input data was invalid.")
-
+            logging.info("Saved the final shard.")
     except Exception as e:
-        print(f"An error occurred: {e}", file=sys.stderr)
+        logging.error(f"An error occurred during processing: {e}", exc_info=True)
+
+    if shard_count == 0:
+        logging.warning("No outputs were saved. Check if all prompts were skipped or input data was invalid.")
 
 if __name__ == "__main__":
     import argparse
