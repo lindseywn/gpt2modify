@@ -4,6 +4,7 @@ import pickle
 import sys
 import time
 from typing import Optional, Iterator, Tuple, Sequence
+import lzma
 
 import torch
 from torch import nn
@@ -19,19 +20,20 @@ class PrecomputedShardLoader:
         self.shard_dirs = shard_dirs
         self.use_shard_cache = use_shard_cache
         self.shard_cache = {}
-    
+
     def load_shard(self, shard_path: str):
         if shard_path in self.shard_cache:
             return self.shard_cache[shard_path]
-        
-        with open(shard_path, "rb") as file:
+
+        print(shard_path)
+        with lzma.open(shard_path, "rb") as file:
             shard = pickle.load(file)
-        
+
         if self.use_shard_cache:
             self.shard_cache[shard_path] = shard
-        
+
         return shard
-    
+
     def __iter__(self):
         for shard_dir in self.shard_dirs:
             for shard_file in os.listdir(shard_dir):
