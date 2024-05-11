@@ -12,7 +12,7 @@ import pdb
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 DTYPE = torch.float32
-DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+DEVICE = torch.device('cuda:0')
 
 def write_shard(outputs, shard_path, compress=False):
     try:
